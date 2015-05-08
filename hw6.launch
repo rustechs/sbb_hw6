@@ -1,0 +1,11 @@
+<!--
+
+Anthony McNicoll 2015
+
+Note that although this launch file launches multiple nodes, it only executes the controller. By calling other Python modules like baxter_interface, the controller node launches other nodes itself.
+
+-->
+
+<launch>
+  <node name="$(anon control)" pkg="sbb_hw6" type="controller.py" output="screen"/>
+</launch>

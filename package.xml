@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<package>
+  <name>sbb_hw6</name>
+  <version>0.1.0</version>
+  <description>Super Baxter Bros. HW6 submission for Robot Manipulation</description>
+
+  <maintainer email="am859@cornell.edu">Anthony McNicoll</maintainer>
+  <maintainer email="av333@cornell.edu">Alex Volkov</maintainer>
+  <maintainer email="zl347@cornell.edu">Zhuo Li</maintainer>
+  <maintainer email="cas489@cornell.edu">Carolyn Strock</maintainer>
+  
+  <license>WTFPL</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>rospy</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>message_generation</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <run_depend>rospy</run_depend>
+  <run_depend>std_msgs</run_depend>
+  <run_depend>roscpp</run_depend> 
+  <run_depend>sensor_msgs</run_depend>
+  <run_depend>message_runtime</run_depend>
+  
+  <export>
+  </export>
+
+</package>
