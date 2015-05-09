@@ -135,11 +135,33 @@ class locate_stuff():
 
         # Check if there's enough orange pixels to constitute a ball
         if float(cv2.countNonZero(self.imgThreshBall))/(self.img.shape[0]*self.img.shape[1]) >= 0.002:
-            m = cv2.moments(self.imgThreshBall)
-            x = int(m['m10']/m['m00'])
-            y = int(m['m01']/m['m00'])
-            dx = x - self.center[0]
-            dy = self.center[1] - y
+
+            # Old Naive method
+            # m = cv2.moments(self.imgThreshBall)
+            # x = int(m['m10']/m['m00'])
+            # y = int(m['m01']/m['m00'])
+            # dx = x - self.center[0]
+            # dy = self.center[1] - y
+
+            # Find the right contour
+            c,h = cv2.findContours(self.imgThreshBall,1,2)
+            
+            maxcArea = 0
+            for i in range(len(c)):
+                 cAreas = cv2.contourArea(c[i])
+                 if maxcArea<cAreas:
+                    maxcArea = cAreas
+                    indexcArea = i
+              
+            cnt = c[indexcArea]  # Usually contours with maximum area corresponds to the ball 
+
+            (x,y),radius = cv2.minEnclosingCircle(cnt)
+            center = (int(x),int(y))
+            radius = int(radius)
+            # img = cv2.circle(img,center,radius,(0,255,0),2)  #DB PLot
+
+            dx = center[0] - self.center[0]
+            dy = self.center[1] - center[1]
             return (True,dx,dy,0)
         else:
             return (False,0,0,0)
