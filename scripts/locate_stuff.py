@@ -8,29 +8,39 @@ from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs.msg import Image
 from sbb_hw5.srv import *
 
-import tesseract
+# import tesseract
 
 class locate_stuff():
 
-    def __init__(self):
+    def __init__(self, limbSide):
+
         # Listen to camera image topic
-        self.img_sub = rospy.Subscriber('cameras/right_hand_camera/image',Image,self.parseFrame)
-        # Provide a service to return newest bowl/block pose
+        if limbSide == 'left':
+            self.img_sub = rospy.Subscriber('cameras/left_hand_camera/image',Image,self.parseFrame)
+        elif limbSide == 'right':
+            self.img_sub = rospy.Subscriber('cameras/right_hand_camera/image',Image,self.parseFrame)
+        else:
+            rospy.logwarn('Invalid limb side argument: ' + limbSide)
+            raise
+
+        # Provide a service to return newest ball/block pose
         self.img_serv = rospy.Service('find_stuff',FindStuffSrv,self.servCall)
-        # Publish overlayed image
-        # self.img_pub = rospy.Publisher('/cv/bowl_block',Image,queue_size=10)
+
+        # Publish overlayed image, ONLY for development DB process
+        # self.img_pub = rospy.Publisher('/cv/ball_block',Image,queue_size=10)
         self.img_pub = rospy.Publisher('/robot/xdisplay',Image,queue_size=10)
+
         # Create a image conversion bridge
         self.br = CvBridge()
-        self.blockLoc = (False,0,0,0)
-        self.bowlLoc = (False,0,0,0)
+        self.blockLoc = (False,0,0,0)  #(bool,x,y,z)
+        self.balllLoc = (False,0,0,0)
         self.center = (0,0)
-        self.ocrAPI = tesseract.TessBaseAPI()
-        self.ocrAPI.Init(".","eng",tesseract.OEM_DEFAULT)
-        self.ocrAPI.SetPageSegMode(tesseract.PSM_AUTO)
+        # self.ocrAPI = tesseract.TessBaseAPI()
+        # self.ocrAPI.Init(".","eng",tesseract.OEM_DEFAULT)
+        # self.ocrAPI.SetPageSegMode(tesseract.PSM_AUTO)
 
     # Camera frame topic callback
-    # Find bowl and block on each frame refresh
+    # Find ball and block on each frame refresh
     def parseFrame(self,data):
         # Convert image into openCV format
         try:
@@ -39,17 +49,17 @@ class locate_stuff():
             print e
             raise
         
-        # Get frame center
+        # Get frame center (x,y)
         self.center = (int(self.img.shape[1]/2),int(self.img.shape[0]/2))
 
         # Convert image to HSV
         self.imgHSV = cv2.cvtColor(self.img,cv2.COLOR_BGR2HSV)
 
-        # Detect block and bowl, save to state variables
+        # Detect block and ball, save to state variables
         self.blockLoc = self.findBlock()
-        self.bowlLoc = self.findBowl()
+        self.ballLoc = self.findBall()
        
-        rospy.loginfo("Bowl Location: %s" % str(self.bowlLoc))
+        rospy.loginfo("Ball Location: %s" % str(self.ballLoc))
         rospy.loginfo("Block Location: %s" % str(self.blockLoc))
 
         # Publish a pretty picture of what we found
@@ -60,12 +70,12 @@ class locate_stuff():
         # Show unmasked img
         # imgShow = img
 
-        # Create masked image for bowl
-        imgShowBowl = cv2.bitwise_and(self.img,self.img,mask = self.imgThreshBowl)
+        # Create masked image for ball
+        imgShowBall = cv2.bitwise_and(self.img,self.img,mask = self.imgThreshBall)
 
         # Add block to masked image
         imgShowBlock = cv2.bitwise_and(self.img,self.img,mask = self.imgThreshBlock)
-        imgShow = cv2.bitwise_or(imgShowBowl,imgShowBlock)
+        imgShow = cv2.bitwise_or(imgShowBall,imgShowBlock)
 
         # Plot the center
         cv2.circle(imgShow,self.center,5,(30,30,240),-1)
@@ -93,9 +103,10 @@ class locate_stuff():
             # cv2.circle(imgShow,tuple(self.box[2]),4,(240,50,30),-1)
             # cv2.circle(imgShow,tuple(self.box[1]),4,(30,50,240),-1)
             # cv2.circle(imgShow,tuple(self.box[3]),4,(30,50,240),-1)
-        # If bowl was found, show it
-        if self.bowlLoc[0]:
-            cv2.circle(imgShow,(self.bowlLoc[1]+self.center[0],self.center[1]-self.bowlLoc[2]),5,(30,240,30),-1)
+
+        # If ball was found, show it
+        if self.ballLoc[0]:
+            cv2.circle(imgShow,(self.ballLoc[1]+self.center[0],self.center[1]-self.ballLoc[2]),5,(30,240,30),-1)
         
         # Publish image
         self.img_pub.publish(self.br.cv2_to_imgmsg(cv2.resize(imgShow,(1024,600)), "bgr8"))
@@ -103,27 +114,28 @@ class locate_stuff():
     # Deal with service call by parsing argument, returning latest location for item
     def servCall(self,data):
         # Use latest image to look for stuff, return it
-        if data.item == 'bowl':
-            return FindStuffSrvResponse(*self.bowlLoc)
+        if data.item == 'ball':
+            return FindStuffSrvResponse(*self.balllLoc)
         elif data.item == 'block':
             return FindStuffSrvResponse(*self.blockLoc)
         else:
-            raspy.logerr("Incorrect service call argument, use either bowl or block")
+            raspy.logerr("Incorrect service call argument, use either ball or block")
             raise
 
-    # Find bowl using basic color thresholding centroid method
+    # Find ball using basic color thresholding centroid method
     # If found, orientation defaults to 0
     # Returns type (found,x,y,t)
-    def findBowl(self):
-        # Green Color
+    def findBall(self):
+
+        #!!! Need to measure color for the orange ball
         MIN = np.array([25,60,10])
         MAX = np.array([85,180,115])
 
-        self.imgThreshBowl = cv2.inRange(self.imgHSV,MIN,MAX)
+        self.imgThreshBall = cv2.inRange(self.imgHSV,MIN,MAX)
 
-        # Check if there's enough green pixels to constitute a bowl
-        if float(cv2.countNonZero(self.imgThreshBowl))/(self.img.shape[0]*self.img.shape[1]) >= 0.05:
-            m = cv2.moments(self.imgThreshBowl)
+        # Check if there's enough orange pixels to constitute a ball
+        if float(cv2.countNonZero(self.imgThreshBall))/(self.img.shape[0]*self.img.shape[1]) >= 0.002:
+            m = cv2.moments(self.imgThreshBall)
             x = int(m['m10']/m['m00'])
             y = int(m['m01']/m['m00'])
             dx = x - self.center[0]
@@ -153,15 +165,15 @@ class locate_stuff():
         self.imgThreshBlock[:topW,:] = 0
         self.imgThreshBlock[botW:,:] = 0
 
-        # Check if there's enough green pixels to constitute a block
+        # Check if there's enough blue pixels to constitute a block
         if float(cv2.countNonZero(self.imgThreshBlock))/(self.img.shape[0]*self.img.shape[1]) >= 0.005:
             # m = cv2.moments(self.imgThreshBlock)
             # print "I see a block"
             # dx = x - self.center[0]
             # dy = self.center[1] - y
 
-            # Do OCR
-            self.OCR()
+            # # Do OCR
+            # self.OCR()
             
             # Find the right contour
             c,h = cv2.findContours(self.imgThreshBlock,1,2)
@@ -175,11 +187,11 @@ class locate_stuff():
                     maxcArea = cAreas
                     indexcArea = i
               
-            cnt = c[indexcArea]
+            cnt = c[indexcArea]               # Usually contours with maximum area corresponds to the block 
 
-            rect = cv2.minAreaRect(cnt)
+            rect = cv2.minAreaRect(cnt)       # Minimum fitted ractangle to the blue block
            
-            self.box = cv2.cv.BoxPoints(rect)
+            self.box = cv2.cv.BoxPoints(rect) # Convert to box objecct
             self.box = np.int0(self.box)
             
             # print(self.box)
@@ -192,7 +204,7 @@ class locate_stuff():
             y = int(y)
 
             pt21 = self.box[0]-self.box[1]
-            t = (np.arctan2(pt21[1],pt21[0])) % (np.pi/2)
+            t = (np.arctan2(pt21[1],pt21[0])) % (np.pi/2)  # Calculate block orientation ranged from 0 to 90 degree
 
             dx = x - self.center[0]
             dy = self.center[1] - y
@@ -202,11 +214,11 @@ class locate_stuff():
 
 
     # Recognise numbers on block
-    def OCR(self):
+    # def OCR(self):
     	
-    	tesseract.SetCvImage(self.img,self.ocrAPI)
-     	text=self.ocrAPI.GetUTF8Text()
-     	print 'Block number is ' + str(text)
+    # 	tesseract.SetCvImage(self.img,self.ocrAPI)
+    #  	text=self.ocrAPI.GetUTF8Text()
+    #  	print 'Block number is ' + str(text)
         
 
 # Main loop
