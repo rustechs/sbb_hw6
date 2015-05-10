@@ -1,17 +1,31 @@
 #!/usr/bin/env python
 
 '''
-    Controller node for HW5.
+    Controller node for HW6.
 
-    Makes service calls to our CV node and tries to servo to a block to pick it up.
+    The controller assumes one of three states:
 
-    It first servos to the bowl, nodding to indicate the bowl was found.
-    It then servos to the block, retrieves it, and place it on the table.
+    Initialize (State 0)
+        Initialize all objects, send logo message to Baxter, etc.
+        Poll for 3 grip buttons: one at circle, one at midfield, one on stack.
+
+    Setup (State 1)
+        Take the three blocks from stack and lay them out as a wall.
+
+    Defend (State 2)
+        When ball not in range, swing hand back and forth across goal.
+
+    Acquire (State 3)
+        When ball in range, scan for it and pick it up with CV.
+
+    Toss (State 4)
+        If we have the ball, execute toss maneuvre and go back to Defend.
 '''
 
-import rospy, robot_interface
+import sys, rospy, robot_interface
+from math import pi
 from random import random
-from sbb_hw5.srv import *
+from sbb_hw6.srv import *
 from geometry_msgs.msg import Point, Quaternion, Pose
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
 
@@ -23,36 +37,41 @@ class Controller():
 
         # Hard-coded settings for initial pose and table location
         rospy.loginfo('Initializing controller')
+        self.side = side
+        self.searchD = .05
         self.tableZ = -.07
         self.scanZ = .3
         self.safeZ = .08
         self.xyTol = .01
         self.thetaTol = .3
-        self.bowlD = .15
         self.controlGain = .5
         self.pixCalZ = .15
         self.pixCalN = 78
         self.pixCalD = .044
+        self.camOffset = .035
         self.xmin = .3
-        self.ymin = -.6
+        self.ymin = {right: -.6, left: .1}
         self.xmax = .8
-        self.ymax = -.1
+        self.ymax = {right: -.1, left: .6}
 
-        # Convient poses, orientations, etc
-        self.downwards = self.e2q(0, 3.14, 0)
-        self.home = Pose(Point(.5, -.5, self.scanZ), self.downwards)
-        self.destination = Pose(Point(.5, 0, self.tableZ), self.downwards)
+        # Define the useful "downwards" quaternion
+        self.downwards = self.e2q(0, pi, 0)
 
         # initialize the Baxter object
-        # Note that Baxter should be using his right arm
         # The bowl should be within the right arm's reachable workspace on table
         rospy.loginfo('Connecting to Baxter...')
         self.baxter = robot_interface.Baxter()
         self.baxter.enable()
         rospy.loginfo('Connected to Baxter successfully.')
 
-        # Send Baxter's arm to the initial position
-        self.goHome()
+        # This node must send initialization info to the game server. Do it now.
+        self.gs = rospy.ServiceProxy('/game_server/init', InitSrv)
+        rospy.wait_for_service('/game_server/init')
+        resp = self.gs('Super Baxter Bros.', [todologo])
+        self.side = resp.arm
+
+        # This node must also subscribe to the game server topic
+        rospy.Subscriber('/game_server/game_state', GameState, self.storeState)
 
         # This node makes use of the find_stuff service
         self.cv = rospy.ServiceProxy('find_stuff', FindStuffSrv)
@@ -66,20 +85,20 @@ class Controller():
     # Convenience function for getting the angular alignment in YZ plane from pose
     def getW(self, p):
         eu = euler_from_quaternion([p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w])
-        return self.rerange(eu[2]+3.14159)
+        return self.rerange(eu[2] + pi)
 
-    # Convenience function for changing the angular alignment only
-    def setW(self, w):
-        p = self.baxter.getEndPose('right')
-        p.orientation = self.e2q(0, 3.14, w)
-        self.baxter.setEndPose('right',p)
+    # Convenience function for changing the angular alignment in YZ only
+    def setW(self, side, w):
+        p = self.baxter.getEndPose(side)
+        p.orientation = self.e2q(0, pi, w)
+        self.baxter.setEndPose(side,p)
 
     # Puts a value in the -pi to pi range
     def rerange(self, val):
-        if val > 3.14159:
-            return (val % (2*3.14159)) - 2*3.14159
-        elif val < -3.14159:
-            return -(-val % (2*3.14159)) + 2*3.14159
+        if val > pi:
+            return (val % (2*pi)) - 2*pi
+        elif val < -pi:
+            return -(-val % (2*pi)) + 2*pi
         else:
             return val
 
@@ -91,19 +110,25 @@ class Controller():
         height = ps.position.z - self.tableZ
         return (pix * (height/self.pixCalZ) * self.pixCalD) / self.pixCalN
 
-    # This is the callback for processing incoming command messages.
-    def goHome(self):
-        self.baxter.setEndPose('right', self.home)
+    # This allows the user to teach positions using the grip buttons.
+    def calibPose(self, side):
+        # Define the "goalpost" positions TODO
+        self.goal1 = 0
+        self.goal2 = 0
+
+    # This listens to the state publishing topic and remembers the state info internally
+    def storeState(self, data):
+        self.state = data.current_phase
 
     # Get a response from CV service: found, x, y, theta (theta doesn't matter)
     # x, y are converted to meters before returning
-    def getBowl(self):
+    def getBall(self):
         rospy.wait_for_service('find_stuff')
-        bowl = self.cv('bowl')
-	oldx = bowl.x
-        bowl.x = self.pix2m(bowl.y) - .035
-        bowl.y = -self.pix2m(oldx)
-        return bowl
+        ball = self.cv('ball')
+	oldx = ball.x
+        ball.x = self.pix2m(ball.y) - self.camOffset
+        ball.y = -self.pix2m(oldx)
+        return ball
 
     # Get a response from CV service: found, x, y, theta
     # x, y are converted to meters before returning
@@ -111,58 +136,54 @@ class Controller():
         rospy.wait_for_service('find_stuff')
         block = self.cv('block')
 	oldx = block.x
-        block.x = self.pix2m(block.y) - .035
+        block.x = self.pix2m(block.y) - self.camOffset
         block.y = -self.pix2m(oldx)
         return block
 
     # Coordinates pick-place action done by Baxter
     # "from" and "to" need to be poses of the end link
     # Since we are AGAIN doing upright orientation only, neglect end effector
-    def pickPlace(self, fromP, toP):
+    def pickPlace(self, side, romP, toP):
 
         rospy.loginfo('Performing pick/place.')
 
         # Make safe pre-pick pose and go
         ps = Pose(Point(fromP.position.x, fromP.position.y, self.safeZ), fromP.orientation)
-        self.baxter.openGrip('right')
-        self.baxter.setEndPose('right', ps)
+        self.baxter.openGrip(side)
+        self.baxter.setEndPose(side, ps)
 
         # Go to pick and pick
-        self.baxter.setEndPose('right', fromP)
-        self.baxter.closeGrip('right')
+        self.baxter.setEndPose(side, fromP)
+        self.baxter.closeGrip(side)
 
         # Path to place pose through safe points
-        self.baxter.setEndPose('right', ps)
+        self.baxter.setEndPose(side, ps)
         ps = Pose(Point(toP.position.x, toP.position.y, self.safeZ), toP.orientation)
-        self.baxter.setEndPose('right', ps)
-        self.baxter.setEndPose('right', toP)
+        self.baxter.setEndPose(side, ps)
+        self.baxter.setEndPose(side, toP)
 
         # Finish place and back off to safe height
-        self.baxter.openGrip('right')
-        self.baxter.setEndPose('right', ps)
+        self.baxter.openGrip(side)
+        self.baxter.setEndPose(side, ps)
         rospy.loginfo('Pick/place complete.')
 
-    # This function attempts to put the end effector within sight of the bowl centroid.
+    # This function attempts to put the end effector within sight of the ball centroid.
     # If the current end pose does not accomplish this, it moves to a random pose in the 
-    # search plane, and checks again - repeating until it is successful.
-    # Never. Give. Up. Timeouts are for wimps.
-    def scanForBowl(self):
-        rospy.loginfo('Scanning for bowl...')
-        while True:
-            bowl = self.getBowl()
-            if bowl.found:
-                rospy.loginfo('Bowl found.')
-                return bowl
-            else:
-                xpos = self.xmin + (self.xmax - self.xmin)*random()
-                ypos = self.ymin + (self.ymax - self.ymin)*random()
-                ps = Pose(Point(xpos, ypos, self.scanZ), self.downwards)
-                self.baxter.setEndPose('right', ps)
+    # search plane, and checks again. Call repeatedly until succesful.
+    def scanForBall(self, side):
+        ball = self.getBall()
+        if ball.found:
+            rospy.loginfo('Ball found.')
+            return ball
+        else:
+            xpos = self.xmin + (self.xmax - self.xmin)*random()
+            ypos = self.ymin[side] + (self.ymax[side] - self.ymin[side])*random()
+            ps = Pose(Point(xpos, ypos, self.scanZ), self.downwards)
+            self.baxter.setEndPose(side, ps)
 
-    # Same as scanForBowl, except that the range of motion is restricted to the bowl's
-    # diameter, about the initial point. Checks for exceeding xmin/xmax are implemented.
-    def scanForBlock(self):
-        rospy.loginfo('Scanning for block...')
+    # Same as scanForBall, except that the range of motion is restricted to the bowl's
+    # diameter, about the initial point. Checks for exceeding xmin/xmax aren't implemented.
+    def scanForBlock(self, side):
         start = self.baxter.getEndPose('right')
         while True:
             block = self.getBlock()
@@ -170,15 +191,15 @@ class Controller():
                 rospy.loginfo('Block found.')
                 return block
             else:
-                xpos = start.position.x + self.bowlD*(random() - .5)
-                ypos = start.position.y + self.bowlD*(random() - .5)
+                xpos = start.position.x + self.searchD*(random() - .5)
+                ypos = start.position.y + self.searchD*(random() - .5)
                 ps = Pose(Point(xpos, ypos, self.scanZ), self.downwards)
-                self.baxter.setEndPose('right', ps)
+                self.baxter.setEndPose(side, ps)
 
     # This function must be run only when we are reliably in range of an object
     # It performs choppy closed-loop semi-proportional control of the end effector
     # until it is aligned and directly over the object.
-    def controlTo(self, objective):
+    def controlTo(self, side, objective):
 
         rospy.loginfo('Controlling to %s center...' % objective)
 
@@ -192,11 +213,11 @@ class Controller():
         if objective == 'block':
             objfun = lambda: self.getBlock()
         else:
-            objfun = lambda: self.getBowl()
+            objfun = lambda: self.getBall()
 
         # Control loop. Never. Give. Up.
         while True:
-            ps = self.baxter.getEndPose('right')
+            ps = self.baxter.getEndPose(side)
             obj = objfun()
             if not obj.found:
                 rospy.loginfo('Lost %s! Aborting control.' % objective)
@@ -207,12 +228,12 @@ class Controller():
                 rospy.loginfo('Center control complete.')                
                 return ps
             newx = clamp(ps.position.x + (obj.x * self.controlGain), self.xmin, self.xmax)
-            newy = clamp(ps.position.y + (obj.y * self.controlGain), self.ymin, self.ymax)
+            newy = clamp(ps.position.y + (obj.y * self.controlGain), self.ymin[side], self.ymax[side])
             ps = Pose(Point(newx, newy, ps.position.z), self.downwards)
-            self.baxter.setEndPose('right', ps)
+            self.baxter.setEndPose(side, ps)
 
     # This does the rotational alignment control.
-    def alignWith(self, objective):
+    def alignWith(self, side, objective):
 
         rospy.loginfo('Aligning with %s ...' % objective)
         delTheta = 1000
@@ -221,7 +242,7 @@ class Controller():
         if objective == 'block':
             objfun = lambda: self.getBlock()
         else:
-            objfun = lambda: self.getBowl()
+            objfun = lambda: self.getBall()
 
         # Control loop. Never. Give. Up.
         while True:
@@ -238,7 +259,7 @@ class Controller():
                 rospy.loginfo('Alignment complete.')                
                 return ps
             newt = self.rerange(self.getW(ps)- obj.t)
-            self.setW(newt)
+            self.setW(side, newt)
 
     # Performs the sequence of actions required to accomplish HW5 CV objectives.
     def execute(self):
@@ -257,8 +278,10 @@ class Controller():
 # This is what runs when the script is executed externally.
 # It runs the main node function, and catches exceptions.
 if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print "You need to specify a side!"
     try:
-        controller = Controller()
+        controller = Controller(sys.argv[1])
         controller.execute()
     except:
         import pdb, traceback, sys
