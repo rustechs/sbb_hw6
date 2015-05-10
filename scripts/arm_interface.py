@@ -17,48 +17,38 @@ from baxter_core_msgs.srv import (
     SolvePositionIK,
     SolvePositionIKRequest,
 )
+from baxter_core_msgs.msg import DigitalIOState
 from sensor_msgs.msg import Image
 
-# The baxter class definition
-# Acts as a wrapper for many useful baxter_interface, moveit methods
+# The arm class definition
+# Acts as a wrapper for many useful baxter_interface methods
 # Also spawns a node to interface with IK Service
-class Baxter():
+class Arm():
 
-    # Baxter class constructor
-    def __init__(self, baxter_name="Baxter", do_grippers = True):
+    # Constructor
+    def __init__(self, side = 'left', do_grippers = True):
 
-        rospy.init_node("Baxter_Node", anonymous = True)
+        rospy.init_node("SBB_Arm_Node", anonymous = True)
+        self.side = side
         
-        # Give him a creative name
-        self.name = baxter_name
-
-        # Create head instance
-        self.head = baxter_interface.Head()
-        
-        # Create baxter arm instances
-        self.right_arm = baxter_interface.Limb('right')
-        self.left_arm = baxter_interface.Limb('left')
+        # Create Baxter arm instance
+        self.limb = baxter_interface.Limb(side)
         self.BaxEnable = baxter_interface.RobotEnable()
 
-        # Create baxter gripper instances
+        # Create Baxter gripper instance
         if do_grippers:
-            self.right_gripper = baxter_interface.Gripper('right')
-            self.left_gripper = baxter_interface.Gripper('left')
-            self.right_gripper.calibrate()
-            self.left_gripper.calibrate()
+            self.gripper = baxter_interface.Gripper(side)
+            self.gripper.calibrate()
 
-        # Create Baxter Hand Cameras
-        self.rhc = baxter_interface.CameraController('right_hand_camera')
-        self.lhc = baxter_interface.CameraController('left_hand_camera')
+        # Create Baxter camera instance
+        self.cam = baxter_interface.CameraController(side + '_hand_camera')
 
-        # Initialize camera (right only for now)
-        self.setCamera('right')
+        # Initialize camera
+        self.setCamera(side)
 
-    # Change face to a file we have
-    def face(self, fname):
-        img = cv2.imread(self.impath + fname + '.png')
-        msg = cv_bridge.CvBridge().cv2_to_imgmsg(img, encoding="bgr8")
-        self.facepub.publish(msg)
+        # Subscribe to the cuff button
+        rospy.Subscriber('/robot/digital_io/' + side +'_lower_button/state', 
+                         DigitalIOState, self.storeCuff)
 
     # Enable the robot
     # Must be manually called after instantiation 
@@ -78,110 +68,61 @@ class Baxter():
     def stop(self):
         self.BaxEnable.stop()
 
-    # Close specified gripper
-    # Defaults to blocking
-    def closeGrip(self, limbSide, block=True):
-        try:
-            if limbSide == 'left':
-                self.left_gripper.close(block)
-            elif limbSide == 'right':
-                self.right_gripper.close(block)
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid limb side argument: ' + limbSide)
-            raise
+    # Keeps track of the cuff button state
+    def storeCuff(self, data):
+        self.cuff = (data.state == 1)
 
-    # Open specified gripper
-    # Defaults to blocking
-    def openGrip(self, limbSide, block=True):
-        try:
-            if limbSide == 'left':
-                self.left_gripper.open(block)
-            elif limbSide == 'right':
-                self.right_gripper.open(block)
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid limb side argument: ' + limbSide)
-            raise
+    # Blocks until the cuff button is pressed
+    # Can run forever...
+    def waitForCuff(self):
+        while True:
+            if self.cuff:
+                return
+            rospy.spin(10)
 
-    # Set specified gripper's applied force
+    # Close gripper
+    # Defaults to blocking
+    def closeGrip(self, block=True):
+        self.gripper.close(block)
+
+    # Open gripper
+    # Defaults to blocking
+    def openGrip(self, block=True):
+        self.gripper.open(block)
+
+    # Set gripper's applied force
     # Specify force in % (0-100), mapping to 0-30 N
     def setGripForce(self, limbSide, force):
-        try:
-            if limbSide == 'left':
-                self.left_gripper.set_moving_force(force)
-                self.left_gripper.set_holding_force(force)
-            elif limbSide == 'right':
-                self.right_gripper.set_moving_force(force)
-                self.right_gripper.set_holding_force(force)
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid limb side argument: ' + limbSide)
-            raise
+        self.gripper.set_moving_force(force)
+        self.gripper.set_holding_force(force)
 
     # Check if specified gripper is ready
     # Returns true iff gripper is calibrated, not in error state, and not moving
     def getGripReady(self, limbSide):
-        try:
-            if limbSide == 'left':
-                return self.left_gripper.ready()
-            elif limbSide == 'right':
-                return self.right_gripper.ready()
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid limb side argument: ' + limbSide)
-            raise
+        return self.gripper.ready()
     
     # Method for getting joint configuration
     # Direct call to baxter_interface
     # Returns: dict({str:float})
     # unordered dict of joint name Keys to angle (rad) Values
-    def getJoints(self, limbSide):
-        try:
-            if limbSide == 'left':
-                return self.left_arm.joint_angles()
-            elif limbSide == 'right':
-                return self.right_arm.joint_angles()
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid limb side name ' + limbSide)
-            raise
+    def getJoints(self):
+        return self.limb.joint_angles()
 
     # Method for getting end-effector position
-    def getEndPose(self,limbSide):
-        
-        # Conveniently call Baxter's endpoint_pose() methods
-        try:
-            if limbSide == 'left':
-                out = self.left_arm.endpoint_pose() 
-            elif limbSide == 'right':
-                out = self.right_arm.endpoint_pose()
-            else: 
-                raise
-        except:
-            rospy.logwarn('Invalid limb side name #: ' + limbSide)
-            raise
+    def getEndPose(self):
+        # Get pose as dict
+        out = self.limb.endpoint_pose() 
 
         # From dict to Pose object
         return Pose(Point(*out['position']), Quaternion(*out['orientation']))
 
     # Method for setting joint positions
     # Direct call to baxter_interface
-    def setJoints(self,limbSide,angles):
-        if limbSide == 'left':
-            self.left_arm.move_to_joint_positions(angles)
-        elif limbSide == 'right':
-            self.right_arm.move_to_joint_positions(angles)
-        else:
-            rospy.logwarn('Incorrect limb string: %s' % limbSide)
+    def setJoints(self, angles):
+        self.limb.move_to_joint_positions(angles)
 
     # Method for calculating joint angles given a desired end-effector pose
-    def getIKGripper(self, limbSide, setPose):
+    def getIKGripper(self, setPose):
 
         # Prepare the request
         hdr = Header(stamp=rospy.Time.now(), frame_id='base')
@@ -189,7 +130,7 @@ class Baxter():
         ikreq = SolvePositionIKRequest([ps], [], 0)
 
         # Make the service call
-        srvName = 'ExternalTools/' + limbSide + '/PositionKinematicsNode/IKService'
+        srvName = 'ExternalTools/' + self.side + '/PositionKinematicsNode/IKService'
         srvAlias = rospy.ServiceProxy(srvName, SolvePositionIK)
         rospy.wait_for_service(srvName)
         resp = srvAlias(ikreq)
@@ -202,13 +143,13 @@ class Baxter():
 
     # Methods for setting cartesian position of hand
     # setPose is a global pose
-    def setEndPose(self, limbSide, setPose):
-        ik_joints = self.getIKGripper(limbSide, setPose)
-        self.setJoints(limbSide,ik_joints)
+    def setEndPose(self, setPose):
+        ik_joints = self.getIKGripper(setPose)
+        self.setJoints(ik_joints)
 
     # This  particular method only changes x, y, z of pose
     # Use by naming arguments you want to change
-    def setEndXYZO(self, limbSide, x = None, y = None, z = None, o = None):
+    def setEndXYZO(self, x = None, y = None, z = None, o = None):
         ps = self.getEndPose(limbSide)
         if x is None:
             x = ps.position.x
@@ -218,27 +159,16 @@ class Baxter():
             z = ps.position.z
         if o is None:
             o = ps.orientation
-        self.setEndPose(limbSide, Point(x, y, z), o)
+        self.setEndPose(Point(x, y, z), o)
 
     # And this changes orientation only. Takes a quaternion.
-    def setEndOrientation(self, limbSide, o):
-        ps = self.getEndPose(limbSide)
+    def setEndOrientation(self, o):
+        ps = self.getEndPose()
         ps.orientation = o
-        self.setEndPose(limbSide, ps)
+        self.setEndPose(ps)
 
     # Camera Settings
     def setCamera(self, name, res=(640,400), fps=10):
-        try:
-            if name == 'left':
-                self.lhc.open()
-                self.lhc.resolution = res
-                self.lhc.fps = fps            
-            elif name == 'right':
-                self.rhc.open()
-                self.rhc.resolution = res
-                self.rhc.fps = fps
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid camera side name #: ' + name)
-            raise
+        self.cam.open()
+        self.cam.resolution = res
+        self.cam.fps = fps            
