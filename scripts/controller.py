@@ -22,10 +22,11 @@
         If we have the ball, execute toss maneuvre and go back to Defend.
 '''
 
-import sys, rospy, robot_interface
+import sys, rospy, robot_interface, rospkg
 from math import pi
 from random import random
 from sbb_hw6.srv import *
+from game_server.srv import *
 from geometry_msgs.msg import Point, Quaternion, Pose
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
 
@@ -65,9 +66,12 @@ class Controller():
         rospy.loginfo('Connected to Baxter successfully.')
 
         # This node must send initialization info to the game server. Do it now.
-        self.gs = rospy.ServiceProxy('/game_server/init', InitSrv)
+        impath = rospack.get_path('sbb_hw6') + '/img/logo.png'
+        img = cv2.imread(impath)
+        imMsg = cv_bridge.CvBridge().cv2_to_imgmsg(img, encoding="bgr8")
+        self.gs = rospy.ServiceProxy('/game_server/init', Init)
         rospy.wait_for_service('/game_server/init')
-        resp = self.gs('Super Baxter Bros.', [todologo])
+        resp = self.gs('Super Baxter Bros.', imMsg)
         self.side = resp.arm
 
         # This node must also subscribe to the game server topic
