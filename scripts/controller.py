@@ -173,16 +173,6 @@ class Controller():
         ball.y = -self.pix2m(oldx)
         return ball
 
-    # Get a response from CV service: found, x, y, theta
-    # x, y are converted to meters before returning
-    def getBlock(self):
-        rospy.wait_for_service('find_stuff')
-        block = self.cv('block')
-	oldx = block.x
-        block.x = self.pix2m(block.y) - self.camOffset
-        block.y = -self.pix2m(oldx)
-        return block
-
     # Coordinates pick-place action done by Baxter
     # "from" and "to" need to be poses of the end link
     # Since we are AGAIN doing upright orientation only, neglect end effector
@@ -214,35 +204,22 @@ class Controller():
     # If the current end pose does not accomplish this, it moves to a random pose in the 
     # search plane, and checks again. Call repeatedly until succesful.
     def scanForBall(self):
-        ball = self.getBall()
-        if ball.found:
-            rospy.loginfo('Ball found.')
-            return ball
-        else:
-            xpos = self.xmin + (self.xmax - self.xmin)*random()
-            ypos = self.ymin + (self.ymax - self.ymin)*random()
-            ps = Pose(Point(xpos, ypos, self.scanZ), self.downwards)
-            self.arm.setEndPose(ps)
-
-    # Same as scanForBall, except that the range of motion is restricted to the bowl's
-    # diameter, about the initial point. Checks for exceeding xmin/xmax aren't implemented.
-    def scanForBlock(self):
-        start = self.arm.getEndPose()
-        while True:
-            block = self.getBlock()
-            if block.found:
-                rospy.loginfo('Block found.')
-                return block
+        while self.state == 3:
+            ball = self.getBall()
+            if ball.found:
+                rospy.loginfo('Ball found.')
+                return True
             else:
-                xpos = start.position.x + self.searchD*(random() - .5)
-                ypos = start.position.y + self.searchD*(random() - .5)
+                xpos = self.xmin + (self.xmax - self.xmin)*random()
+                ypos = self.ymin + (self.ymax - self.ymin)*random()
                 ps = Pose(Point(xpos, ypos, self.scanZ), self.downwards)
                 self.arm.setEndPose(ps)
+        return False
 
     # This function must be run only when we are reliably in range of an object
     # It performs choppy closed-loop semi-proportional control of the end effector
     # until it is aligned and directly over the object.
-    def controlTo(self, objective):
+    def controlToBall(self):
 
         rospy.loginfo('Controlling to %s center...' % objective)
 
@@ -252,57 +229,22 @@ class Controller():
         delX = 1000
         self.setW(0)
 
-        # Select objective function
-        if objective == 'block':
-            objfun = lambda: self.getBlock()
-        else:
-            objfun = lambda: self.getBall()
-
         # Control loop. Never. Give. Up.
-        while True:
+        while self.state == 3:
             ps = self.arm.getEndPose()
-            obj = objfun()
+            obj = self.getBall()
             if not obj.found:
                 rospy.loginfo('Lost %s! Aborting control.' % objective)
-                return  
+                return  False
             delY = abs(obj.y)
             delX = abs(obj.x)
             if (delY < self.xyTol) and (delX < self.xyTol):
                 rospy.loginfo('Center control complete.')                
-                return ps
+                return True
             newx = clamp(ps.position.x + (obj.x * self.controlGain), self.xmin, self.xmax)
             newy = clamp(ps.position.y + (obj.y * self.controlGain), self.ymin, self.ymax)
             ps = Pose(Point(newx, newy, ps.position.z), self.downwards)
             self.arm.setEndPose(ps)
-
-    # This does the rotational alignment control.
-    def alignWith(self, objective):
-
-        rospy.loginfo('Aligning with %s ...' % objective)
-        delTheta = 1000
-
-        # Select objective function
-        if objective == 'block':
-            objfun = lambda: self.getBlock()
-        else:
-            objfun = lambda: self.getBall()
-
-        # Control loop. Never. Give. Up.
-        while True:
-            ps = self.arm.getEndPose()
-            obj = objfun()
-            if not obj.found:
-                rospy.loginfo('Lost %s! Aborting control.' % objective)
-                return  
-            if objective == 'block':
-                delTheta = abs(obj.t)
-            else:
-                delTheta = 0
-            if (delTheta < self.thetaTol):
-                rospy.loginfo('Alignment complete.')                
-                return ps
-            newt = self.rerange(self.getW(ps)- obj.t)
-            self.setW(newt)
 
     # Performs the sequence of actions required to accomplish HW6 objectives.
     def playGame(self):
@@ -339,18 +281,28 @@ class Controller():
             sleep(.005)
 
         # Enter the main state loop
+        curGoal = 0
+        while self.phase > 0
 
-        self.scanForBowl()
-        self.controlTo('bowl')
-        self.scanForBlock()
-        ps = self.arm.getEndPose()
-        ps.position.z = self.safeZ
-        self.arm.setEndPose(ps)
-        bPose = self.controlTo('block')
-        bPose = self.alignWith('block')
-        bPose.position.z = self.tableZ
-        self.pickPlace(bPose, self.destination)
-        rospy.loginfo('All done!')
+            posession = 0 #todo getPosession, set state
+
+            if state == 2:          # Goalkeep
+                curGoal = (curGoal + 1) % 1
+                self.arm.setEndPose(self.goal[curGoal])
+
+            elif state == 3:        # Pick ball
+                success = scanForBall()
+                if success
+                    success = controlToBall()
+                    if success
+                        self.arm.closeGrip()
+
+            elif state == 4:        # Launch ball
+                # Launch ball
+                pass
+
+            else
+                rospy.loginfo('Error: Lost state!')
 
 # This is what runs when the script is executed externally.
 # It runs the main node function, and catches exceptions.
