@@ -10,6 +10,7 @@
 '''
 
 import argparse, sys, rospy, baxter_interface
+from time import sleep
 
 from geometry_msgs.msg import Pose, Point, Quaternion, PoseStamped
 from std_msgs.msg import Header
@@ -72,13 +73,17 @@ class Arm():
     def storeCuff(self, data):
         self.cuff = (data.state == 1)
 
-    # Blocks until the cuff button is pressed
+    # Blocks until the cuff button is pressed and released
     # Can run forever...
     def waitForCuff(self):
         while True:
             if self.cuff:
-                return
-            rospy.spin(10)
+                break
+            sleep(.005)
+        while True:
+            if not self.cuff:
+                break
+            sleep(.005)
 
     # Close gripper
     # Defaults to blocking
