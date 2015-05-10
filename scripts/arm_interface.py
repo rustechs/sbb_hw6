@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 
 '''
-    Robot Interface node for HW5.
+    Robot Interface node for HW6.
 
-    It has been altered since HW3 to use MoveIt.
-    NOPE, JUST KIDDING - MoveIt doesn't work, so we're using the old
-    baxter_interface tools. Perhaps with some speed tweaks.
+    Since HW5, removed some fat (no more faces) and added gripper button
+    access methods.
+    Biggest change is it only controls a single arm - no access at all to other.
+    I may also actually account for the end effector's displacement. Not now.
 '''
 
-import argparse, sys, rospy, cv2, cv_bridge
-import baxter_interface, rospkg
+import argparse, sys, rospy, baxter_interface
 
 from geometry_msgs.msg import Pose, Point, Quaternion, PoseStamped
 from std_msgs.msg import Header
@@ -54,20 +54,11 @@ class Baxter():
         # Initialize camera (right only for now)
         self.setCamera('right')
 
-        # Set up publishing to the face
-        rospack = rospkg.RosPack()
-        self.impath = rospack.get_path('sbb_hw5') + '/img/'
-        self.facepub = rospy.Publisher('/robot/xdisplay', Image, latch=True, queue_size=10)
-
     # Change face to a file we have
     def face(self, fname):
         img = cv2.imread(self.impath + fname + '.png')
         msg = cv_bridge.CvBridge().cv2_to_imgmsg(img, encoding="bgr8")
         self.facepub.publish(msg)
-
-    # Nodding
-    def nod(self):
-        self.head.command_nod()
 
     # Enable the robot
     # Must be manually called after instantiation 
@@ -144,61 +135,6 @@ class Baxter():
         except:
             rospy.logwarn('Invalid limb side argument: ' + limbSide)
             raise
-
-    # Check if specified gripper is gripping (i.e. force threshold reached)
-    def getGripGripping(self, limbSide):
-        try:
-            if limbSide == 'left':
-                return self.left_gripper.gripping()
-            elif limbSide == 'right':
-                return self.right_gripper.gripping()
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid limb side argument: ' + limbSide)
-            raise
-
-    # Check if specified gripper missed object
-    # (i.e. gripper closed without reaching force threshold)
-    def getGripMissed(self, limbSide):
-        try:
-            if limbSide == 'left':
-                return self.left_gripper.missed()
-            elif limbSide == 'right':
-                return self.right_gripper.missed()
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid limb side argument: ' + limbSide)
-            raise
-    
-    # Get specified gripper's current position
-    # Returns as percent (0-100) of full travel range
-    def getGripPos(self, limbSide):
-        try:
-            if limbSide == 'left':
-                return self.left_gripper.position()
-            elif limbSide == 'right':
-                return self.right_gripper.position()
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid limb side argument: ' + limbSide)
-            raise
-
-    # Get specified gripper's current applied force
-    # Returns as percent (0-100) of max applicable force
-    def getGripForce(self, limbSide):
-        try:
-            if limbSide == 'left':
-                return self.left_gripper.force()
-            elif limbSide == 'right':
-                return self.right_gripper.force()
-            else:
-                raise
-        except:
-            rospy.logwarn('Invalid limb side argument: ' + limbSide)
-            raise
     
     # Method for getting joint configuration
     # Direct call to baxter_interface
@@ -216,11 +152,7 @@ class Baxter():
             rospy.logwarn('Invalid limb side name ' + limbSide)
             raise
 
-
     # Method for getting end-effector position
-    # Angular pose will always be top-down, so wrist-gripper displacement doesn't have to be factored in.
-    # Returns the raw ('base') Pose if raw is set to True
-    # Otherwise, returns pose relative to the origin zeroPose
     def getEndPose(self,limbSide):
         
         # Conveniently call Baxter's endpoint_pose() methods
@@ -288,6 +220,7 @@ class Baxter():
             o = ps.orientation
         self.setEndPose(limbSide, Point(x, y, z), o)
 
+    # And this changes orientation only. Takes a quaternion.
     def setEndOrientation(self, limbSide, o):
         ps = self.getEndPose(limbSide)
         ps.orientation = o
@@ -295,19 +228,11 @@ class Baxter():
 
     # Camera Settings
     def setCamera(self, name, res=(640,400), fps=10):
-    # name = left, right
-    # res = [(1280, 800), (960, 600), (640, 400), (480, 300), (384, 240), (320, 200)]
-    # fps = frames per second
         try:
             if name == 'left':
                 self.lhc.open()
                 self.lhc.resolution = res
-                self.lhc.fps = fps
-                # self.lhc.gain(self, gain)                  # Camera gain. 
-                # self.lhc.exposure(self, exposure)          # Camera Exposure. 
-                # self.lhc.white_balance_red(self, value)    # White balance red. 
-                # self.lhc.white_balance_green(self, value)  # White balance green. 
-                # self.lhc.white_balance_blue(self, value)   # White balance blue.             
+                self.lhc.fps = fps            
             elif name == 'right':
                 self.rhc.open()
                 self.rhc.resolution = res
