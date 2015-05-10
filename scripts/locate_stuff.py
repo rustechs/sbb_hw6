@@ -6,11 +6,11 @@ import cv2
 import numpy as np
 from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs.msg import Image
-from sbb_hw5.srv import *
+from sbb_hw6.srv import *
 
 # import tesseract
 
-class locate_stuff():
+class locate_stuff:
 
     def __init__(self, limbSide):
 
@@ -27,8 +27,7 @@ class locate_stuff():
         self.img_serv = rospy.Service('find_stuff',FindStuffSrv,self.servCall)
 
         # Publish overlayed image, ONLY for development DB process
-        # self.img_pub = rospy.Publisher('/cv/ball_block',Image,queue_size=10)
-        self.img_pub = rospy.Publisher('/robot/xdisplay',Image,queue_size=10)
+        self.img_pub = rospy.Publisher('/cv/ball_block',Image,queue_size=10)
 
         # Create a image conversion bridge
         self.br = CvBridge()
@@ -115,7 +114,7 @@ class locate_stuff():
     def servCall(self,data):
         # Use latest image to look for stuff, return it
         if data.item == 'ball':
-            return FindStuffSrvResponse(*self.balllLoc)
+            return FindStuffSrvResponse(*self.ballLoc)
         elif data.item == 'block':
             return FindStuffSrvResponse(*self.blockLoc)
         else:
@@ -252,7 +251,7 @@ def main():
     # Instantiate a node
     locator = locate_stuff()
     
-    print "Ready to find stuff!"
+    rospy.loginfo("locate_stuff node started!")
 
     # Wait for either a topic update or a service call
     rospy.spin()
