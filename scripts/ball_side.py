@@ -51,7 +51,6 @@ class ballSide:
 	    elif:
 	    	imgHSV = imgHSV[:,]
 
-
 	    # Publish result to topic
 	    self.ball_pub.publish(ourSide)
 
