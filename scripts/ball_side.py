@@ -9,82 +9,83 @@ from std_msgs.msg import Bool
 
 class ballSide:
 
-	def __init__(self,side):
-		# Set HSV color constants
-		GREEN = np.array([70,40,80])
-		BALL = np.array([165,30,10])
-		RANGE = np.array([10,20,20])
+    # Set HSV color constants
+    GREEN = np.array([70,40,80])
+    BALL = np.array([165,30,10])
+    RANGE = np.array([10,20,20])
 
-		# Subscribe to head camera frame topic
-	    self.frame_sub = rospy.Subscriber('camera/rgb/image_color',Image,self.parseFrame)
-	    # Publish parsed frames to debug topic
-	    self.frame_pub = rospy.Publisher('sbb/cv/head_cam_overlay',Image,queue_size=10)
-	    # Publish parsing to topic for controller
-	    self.ball_pub = rospy.Publisher('sbb/ball_side',Bool,queue_size=10)
+    def __init__(self,side):
 
-	    # Create bridge to convert between CV and ROS images
-	    self.br = CvBridge()
+        # Subscribe to head camera frame topic
+        self.frame_sub = rospy.Subscriber('camera/rgb/image_color',Image,self.parseFrame)
+        # Publish parsed frames to debug topic
+        self.frame_pub = rospy.Publisher('sbb/cv/head_cam_overlay',Image,queue_size=10)
+        # Publish parsing to topic for controller
+        self.ball_pub = rospy.Publisher('sbb/ball_side',Bool,queue_size=10)
 
-	    # Set what side we're on
-	    self.side = side
+        # Create bridge to convert between CV and ROS images
+        self.br = CvBridge()
 
-	    # Keep track of last side ball was detected on
-	    self.ballSide = None
+        # Set what side we're on
+        self.side = side
 
-	# Camera frame topic callback
-	# Parse the frame, look for ball, and publish result to another topic 
-	def parseFrame(self,data):
-	    # Convert image into openCV format
-	    try:
-	        self.img = br.imgmsg_to_cv2(data, "bgr8")
-	    except CvBridgeError, e:
-	        print e
-	        raise
+        # Keep track of last side ball was detected on
+        self.ballSide = None
 
-	    # Get frame properties -- width, height, and center
-	    self.w = int(self.img.shape[1])
-	    self.h = int(self.img.shape[0])
+    # Camera frame topic callback
+    # Parse the frame, look for ball, and publish result to another topic 
+    def parseFrame(self,data):
+        # Convert image into openCV format
+        try:
+            self.img = self.br.imgmsg_to_cv2(data, "bgr8")
+        except CvBridgeError, e:
+            print e
+            raise
 
-	    # Convert image to HSV
-	    self.imgHSV = cv2.cvtColor(self.img,cv2.COLOR_BGR2HSV)
+        # Get frame properties -- width, height, and center
+        self.w = int(self.img.shape[1])
+        self.h = int(self.img.shape[0])
 
-	    # Perform saturation thresholding
-	    # ???
+        # Convert image to HSV
+        self.imgHSV = cv2.cvtColor(self.img,cv2.COLOR_BGR2HSV)
 
-	    # Find x coordinate of field center
-	    self.centerX = getCenter()
+        # Perform saturation thresholding
+        # ???
 
-	    # Mask off opponent side
-	   	self.ballLoc = findBall()
+        # Find x coordinate of field center
+        self.centerX = self.getCenter()
 
-	   	# If ball was found, check what side it's on
-	   	# Otherwise, publish previous value
-	   	if self.ballLoc is not None:
-	   		
-	    self.ball_pub.publish(ourSide)
+        # Mask off opponent side
+       	self.ballLoc = self.findBall()
 
-	    # publish debug overlay image
-	    self.pubDebugImg()
+       	# If ball was found, check what side it's on
+       	# Otherwise, publish previous value
+       	# if self.ballLoc is not None:
+       	
+        self.ball_pub.publish(ballSide)
 
-	def pubDebugImg(self):
-		self.frame_pub.publish(self.br.cv2_to_imgmsg(self.img, "bgr8"))
+    # Publish debug image to debug topic
+    # Expects HSV image encoding
+    def pubDebugImg(self,debugImg):
+        debugImg = cv2.cvtColor(debugImg,cv2.COLOR_HSV2BGR)
+        self.frame_pub.publish(self.br.cv2_to_imgmsg(debugImg, "bgr8"))
 
-	def getCenter(self):
+    def getCenter(self):
 
-		MIN = GREEN-RANGE/2
-		MAX = GREEN+RANGE/2
+        MIN = ballSide.GREEN-ballSide.RANGE/2
+        MAX = ballSide.GREEN+ballSide.RANGE/2
 
-		# Threshold for green center field
+        # Threshold for green center field
         img = cv2.inRange(self.imgHSV,MIN,MAX)
 
-		# Set up ROI
+        # Set up ROI
         ROIhorz = 0.25
         ROIvert = 0.9
         
         leftW = int(self.w*(1-ROIhorz)/2)
-        rightW = int(self.w[1]*(0.5+ROIhorz/2))
-        topW = int(self.h[0]*(1-ROIvert)/2)
-        botW = int(self.h[0]*(0.5+ROIvert/2))
+        rightW = int(self.w*(0.5+ROIhorz/2))
+        topW = int(self.h*(1-ROIvert)/2)
+        botW = int(self.h*(0.5+ROIvert/2))
 
         # Mask the ROI
         img[:,:leftW] = 0
@@ -94,21 +95,20 @@ class ballSide:
 
         # Find the right contour
         c,h = cv2.findContours(img,1,2)
-        
+
         maxcArea = 0
         for i in range(len(c)):
-             cAreas = cv2.contourArea(c[i])
-             if maxcArea<cAreas:
+            cAreas = cv2.contourArea(c[i])
+            if maxcArea<cAreas:
                 maxcArea = cAreas
                 indexcArea = i
-          
+
         cnt = c[indexcArea]               # Usually contours with maximum area corresponds to the block 
-
         rect = cv2.minAreaRect(cnt)       # Minimum fitted ractangle to the blue block
-
+        self.pubDebugImg(img)
         x,y = rect[0]
-
         return int(x)
+
 
     def findBall(self):
 
@@ -153,14 +153,14 @@ class ballSide:
 
 def main():
 
-	# Init node
+    # Init node
     rospy.init_node('ball_side', anonymous = True)
 
     rospy.loginfo("Waiting on team side assignment")
 
     # Wait for side parameter to exist
     while not rospy.has_param('sbb_side'):
-    	pass
+        pass
 
     # Create ballSide object
     bs = ballSide(rospy.get_param('sbb_side'))
@@ -173,4 +173,4 @@ def main():
     rospy.spin()
 
 if __name__ == "__main__":
-	main()
+    main()
