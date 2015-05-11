@@ -91,8 +91,6 @@ class locate_stuff:
             bW = self.rectW
             cv2.circle(imgShow,(bX,bY),5,(240,50,30),-1)            
             cv2.drawContours(imgShow,[self.box],0,(0,165,200),2)
-            #cv2.line(imgShow,tuple(np.int_((bX-bW*np.cos(bT),bY-bW*np.sin(bT)))),tuple(np.int_((bX+bW*np.cos(bT),bY+bW*np.sin(bT)))),(0,165,200),1)
-            #cv2.line(imgShow,tuple(np.int_((bX-bW*np.cos(bT+np.pi/2),bY-bW*n(0,165,200),1p.sin(bT+np.pi/2)))),tuple(np.int_((bX+bW*np.cos(bT+np.pi/2),bY+bW*np.sin(bT+np.pi/2)))),(0,165,200),1)
             
             pt1 = [bX,bY]
             pt2 = pt1 + (self.box[0] - self.box[1])
@@ -173,23 +171,15 @@ class locate_stuff:
     # Find block using corner detection (with color thresholding)
     # Returns tuple (found,x,y,t)
     def findBlock(self):
-        # Blue Color 
-        MIN = np.array([90,30,10])
-        MAX = np.array([140,160,115])
+        # Blue Color
+        # MIN = np.array([90,30,15])
+        # MAX = np.array([135,115,100])
+
+        MIN = np.array([90,130,15])
+        MAX = np.array([110,200,100])
 
         # Color threshold
         self.imgThreshBlock = cv2.inRange(self.imgHSV,MIN,MAX)
-
-        # Set up ROI
-        ROI = 0.75
-        leftW = int(self.img.shape[1]*(1-ROI)/2)
-        rightW = int(self.img.shape[1]*(0.5+ROI/2))
-        topW = int(self.img.shape[0]*(1-ROI)/2)
-        botW = int(self.img.shape[0]*(0.5+ROI/2))
-        self.imgThreshBlock[:,:leftW] = 0
-        self.imgThreshBlock[:,rightW:] = 0
-        self.imgThreshBlock[:topW,:] = 0
-        self.imgThreshBlock[botW:,:] = 0
 
         # Check if there's enough blue pixels to constitute a block
         if float(cv2.countNonZero(self.imgThreshBlock))/(self.img.shape[0]*self.img.shape[1]) >= 0.005:
