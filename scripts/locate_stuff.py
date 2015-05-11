@@ -8,11 +8,9 @@ from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs.msg import Image
 from sbb_hw6.srv import *
 
-# import tesseract
-
 class locate_stuff:
 
-    def __init__(self, limbSide):
+    def __init__(self,limbSide):
 
         # Listen to camera image topic
         if limbSide == 'left':
@@ -23,16 +21,18 @@ class locate_stuff:
             rospy.logwarn('Invalid limb side argument: ' + limbSide)
             raise
 
+        #import pdb; pdb.set_trace()
+
         # Provide a service to return newest ball/block pose
         self.img_serv = rospy.Service('find_stuff',FindStuffSrv,self.servCall)
 
         # Publish overlayed image, ONLY for development DB process
-        self.img_pub = rospy.Publisher('/cv/ball_block',Image,queue_size=10)
+        self.img_pub = rospy.Publisher('cv/ball_block',Image,queue_size=10)
 
         # Create a image conversion bridge
         self.br = CvBridge()
         self.blockLoc = (False,0,0,0)  #(bool,x,y,z)
-        self.balllLoc = (False,0,0,0)
+        self.ballLoc = (False,0,0,0)
         self.center = (0,0)
         # self.ocrAPI = tesseract.TessBaseAPI()
         # self.ocrAPI.Init(".","eng",tesseract.OEM_DEFAULT)
@@ -41,6 +41,7 @@ class locate_stuff:
     # Camera frame topic callback
     # Find ball and block on each frame refresh
     def parseFrame(self,data):
+
         # Convert image into openCV format
         try:
             self.img = self.br.imgmsg_to_cv2(data, "bgr8")
@@ -127,8 +128,8 @@ class locate_stuff:
     def findBall(self):
 
         #!!! Need to measure color for the orange ball
-        MIN = np.array([25,60,10])
-        MAX = np.array([85,180,115])
+        MIN = np.array([1,35,10])
+        MAX = np.array([35,100,115])
 
         self.imgThreshBall = cv2.inRange(self.imgHSV,MIN,MAX)
 
@@ -169,8 +170,11 @@ class locate_stuff:
     # Returns tuple (found,x,y,t)
     def findBlock(self):
         # Blue Color 
-        MIN = np.array([90,30,10])
-        MAX = np.array([140,160,115])
+        # MIN = np.array([90,30,10])
+        # MAX = np.array([140,160,115])
+
+        MIN = np.array([180,30,10])
+        MAX = np.array([210,180,115])
 
         # Color threshold
         self.imgThreshBlock = cv2.inRange(self.imgHSV,MIN,MAX)
@@ -248,8 +252,14 @@ def main():
     # Init node
     rospy.init_node('locate_stuff', anonymous = True)
     
+    rospy.loginfo("Waiting on team side assignment...")
+    while not rospy.has_param('sbb_side'):
+        pass
+
+    side = rospy.get_param('sbb_side')
+
     # Instantiate a node
-    locator = locate_stuff()
+    locator = locate_stuff(side)
     
     rospy.loginfo("locate_stuff node started!")
 

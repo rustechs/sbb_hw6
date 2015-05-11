@@ -50,6 +50,9 @@ class Controller():
         resp = self.gs('Super Baxter Bros.', imMsg)
         self.side = resp.arm
 
+        # Let our other nodes what side we're using
+        rospy.set_param('sbb_side', self.side)
+
         # This is a useful sign to have later
         if self.side == 'left':
             self.ys = -1
@@ -61,6 +64,9 @@ class Controller():
 
         # This node must also subscribe to the game server topic
         rospy.Subscriber('/game_server/game_state', GameState, self.storeState)
+
+        # The posession tracker also publishes to a topic
+        rospy.Subscriber('sbb/ball_side', Bool, self.storeSide)
 
         # This node makes use of the find_stuff service
         self.cv = rospy.ServiceProxy('find_stuff', FindStuffSrv)
@@ -162,6 +168,10 @@ class Controller():
     # This listens to the state publishing topic and remembers the state info internally
     def storeState(self, data):
         self.phase = data.current_phase
+
+    # This listens to the side tracking topic and keeps it for us
+    def storeSide(self, data):
+        self.side = data.data
 
     # Get a response from CV service: found, x, y, theta (theta doesn't matter)
     # x, y are converted to meters before returning

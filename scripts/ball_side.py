@@ -61,10 +61,6 @@ class ballSide:
 	   	# Otherwise, publish previous value
 	   	if self.ballLoc is not None:
 	   		
-
-	   	# Check if ball is on correct side
-
-	    # Publish result to topic, only if side has changed
 	    self.ball_pub.publish(ourSide)
 
 	    # publish debug overlay image
