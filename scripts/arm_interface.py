@@ -9,8 +9,7 @@
     I may also actually account for the end effector's displacement. Not now.
 '''
 
-import argparse, sys, rospy, baxter_interface
-from time import sleep
+import argparse, sys, rospy, baxter_interface, sched, time
 
 from geometry_msgs.msg import Pose, Point, Quaternion, PoseStamped
 from std_msgs.msg import Header
@@ -18,7 +17,7 @@ from baxter_core_msgs.srv import (
     SolvePositionIK,
     SolvePositionIKRequest,
 )
-from baxter_core_msgs.msg import DigitalIOState
+from baxter_core_msgs.msg import DigitalIOState, JointCommand
 from sensor_msgs.msg import Image
 
 # The arm class definition
@@ -51,6 +50,16 @@ class Arm():
         rospy.Subscriber('/robot/digital_io/' + side +'_lower_button/state', 
                          DigitalIOState, self.storeCuff)
 
+        # We'll be controlling joints directly with messages to the joint control topic
+        self.cmd = rospy.Publisher('robot/limb/' + side + '/joint_command', JointCommand)
+
+        # Set the initial joint command message to what we have
+        self.setJoints(self.getJoints)
+
+        # Start up the scheduler that periodically commands the arm
+        self.s = sched.scheduler(time.time, time.sleep)
+        self.s.enter(.1, 1, self.jointPublisher, ())
+
     # Enable the robot
     # Must be manually called after instantiation 
     def enable(self):
@@ -79,11 +88,11 @@ class Arm():
         while True:
             if self.cuff:
                 break
-            sleep(.005)
+            time.sleep(.005)
         while True:
             if not self.cuff:
                 break
-            sleep(.005)
+            time.sleep(.005)
 
     # Close gripper
     # Defaults to blocking
@@ -122,9 +131,16 @@ class Arm():
         return Pose(Point(*out['position']), Quaternion(*out['orientation']))
 
     # Method for setting joint positions
-    # Direct call to baxter_interface
+    # New as of HW6, uses the topic directly
+    # This means it takes: dict({str:float}) of joints
     def setJoints(self, angles):
-        self.limb.move_to_joint_positions(angles)
+        names = [name for name in iter(angles)]
+        angles = [j[name] for name in iter(angles)]
+        self.jointCmd = JointCommand(1, angles, names)
+
+    def jointPublisher(self):
+        self.cmd.publish(self.jointCmd)
+        self.s.enter(.1, 1, self.jointPublisher, ())
 
     # Method for calculating joint angles given a desired end-effector pose
     def getIKGripper(self, setPose):
