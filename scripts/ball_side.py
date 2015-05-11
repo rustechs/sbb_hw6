@@ -10,9 +10,13 @@ from std_msgs.msg import Bool
 class ballSide:
 
     # Set HSV color constants
-    GREEN = np.array([70,40,80])
-    BALL = np.array([165,30,10])
-    RANGE = np.array([10,20,20])
+    GREEN_MIN = np.array([62,80,190])
+    GREEN_MAX = np.array([78,125,230])
+    BALL_MIN = np.array([160,195,245])
+    BALL_MAX = np.array([175,240,255])
+    BALL_RAD_MIN = 0.01
+    BALL_RAD_MAX = 0.02
+    centerW = 0.04
 
     def __init__(self,side):
 
@@ -30,7 +34,7 @@ class ballSide:
         self.side = side
 
         # Keep track of last side ball was detected on
-        self.ballSide = None
+        self.ourBall = False
 
     # Camera frame topic callback
     # Parse the frame, look for ball, and publish result to another topic 
@@ -50,33 +54,70 @@ class ballSide:
         self.imgHSV = cv2.cvtColor(self.img,cv2.COLOR_BGR2HSV)
 
         # Perform saturation thresholding
-        # ???
+        # Maybe?
 
         # Find x coordinate of field center
         self.centerX = self.getCenter()
 
-        # Mask off opponent side
+        if self.centerX is None:
+            rospy.logerr("Can't find field center!")
+
+        # Find ball in field
        	self.ballLoc = self.findBall()
 
-       	# If ball was found, check what side it's on
-       	# Otherwise, publish previous value
-       	# if self.ballLoc is not None:
-       	
-        self.ball_pub.publish(ballSide)
+       	# If ball was found
+       	if self.ballLoc is not None and self.centerX is not None:
+            rospy.loginfo("Last Known Ball Loc: %s" % str(self.ballLoc))
+            if self.side is 'left': # If we're on the left
+                # Ball has moved to our side since last update
+                if (self.ballLoc[0] >= self.centerX+ballSide.centerW) and (self.ourBall is False):
+                    self.ourBall = True
+                    self.ball_pub.publish(self.ourBall)
+                    rospy.loginfo("Ball is on our side now")
+                # Ball has moved to opponent side since last update
+                elif (self.ballLoc[0] < self.centerX-ballSide.centerW) and (self.ourBall is True):
+                    self.ourBall = False
+                    self.ball_pub.publish(self.ourBall)
+                    rospy.loginfo("Ball is on opponent now")
+            else: # If we're on the right
+                # Ball has moved to our side since last update
+                if (self.ballLoc[0] < self.centerX-ballSide.centerW) and (self.ourBall is False):
+                    self.ourBall = True
+                    self.ball_pub.publish(self.ourBall)
+                    rospy.loginfo("Ball is on our side now")
+                # Ball has moved to opponent side since last update
+                elif (self.ballLoc[0] > self.centerX+ballSide.centerW) and (self.ourBall is True):
+                    self.ourBall = False
+                    self.ball_pub.publish(self.ourBall)
+                    rospy.loginfo("Ball is on opponent now")
+
+        self.pubDebugImg()
 
     # Publish debug image to debug topic
-    # Expects HSV image encoding
-    def pubDebugImg(self,debugImg):
-        debugImg = cv2.cvtColor(debugImg,cv2.COLOR_HSV2BGR)
-        self.frame_pub.publish(self.br.cv2_to_imgmsg(debugImg, "bgr8"))
+    def pubDebugImg(self):
+        imgShow = self.img
+
+        # Show masked center field image
+        # imgShowField = cv2.bitwise_and(imgShow,imgShow,mask = self.centerMask)
+
+        # Show masked ball image
+        imgShow = cv2.bitwise_and(imgShow,imgShow,mask = self.imgThreshBall)
+
+        # imgShow = cv2.bitwise_or(imgShowBall,imgShowField)
+
+        if self.centerX is not None:
+            # Plot a center line if it's found
+            cv2.line(imgShow,(self.centerX,0),(self.centerX,self.h),(30,30,240),1)
+
+        # If ball was found, show it
+        if self.ballLoc is not None:
+            cv2.circle(imgShow,(self.ballLoc[0],self.ballLoc[1]),7,(30,240,30),-1)
+
+        self.frame_pub.publish(self.br.cv2_to_imgmsg(imgShow, "bgr8"))
 
     def getCenter(self):
-
-        MIN = ballSide.GREEN-ballSide.RANGE/2
-        MAX = ballSide.GREEN+ballSide.RANGE/2
-
         # Threshold for green center field
-        img = cv2.inRange(self.imgHSV,MIN,MAX)
+        img = cv2.inRange(self.imgHSV,ballSide.GREEN_MIN,ballSide.GREEN_MAX)
 
         # Set up ROI
         ROIhorz = 0.25
@@ -93,63 +134,29 @@ class ballSide:
         img[:topW,:] = 0
         img[botW:,:] = 0
 
-        # Find the right contour
-        c,h = cv2.findContours(img,1,2)
+        ballSide.centerMask = img
 
-        maxcArea = 0
-        for i in range(len(c)):
-            cAreas = cv2.contourArea(c[i])
-            if maxcArea<cAreas:
-                maxcArea = cAreas
-                indexcArea = i
-
-        cnt = c[indexcArea]               # Usually contours with maximum area corresponds to the block 
-        rect = cv2.minAreaRect(cnt)       # Minimum fitted ractangle to the blue block
-        self.pubDebugImg(img)
-        x,y = rect[0]
-        return int(x)
-
+        m = cv2.moments(img)
+        return int(m['m10']/m['m00'])
 
     def findBall(self):
 
-        #!!! Need to measure color for the orange ball
-        MIN = np.array([25,60,10])
-        MAX = np.array([85,180,115])
+        self.imgThreshBall = cv2.inRange(self.imgHSV,ballSide.BALL_MIN,ballSide.BALL_MAX)
 
-        self.imgThreshBall = cv2.inRange(self.imgHSV,MIN,MAX)
+        # Try to find ball contour
+        c,h = cv2.findContours(self.imgThreshBall,1,2)
+        
+        if len(c) > 0:
 
-        # Check if there's enough orange pixels to constitute a ball
-        if float(cv2.countNonZero(self.imgThreshBall))/(self.img.shape[0]*self.img.shape[1]) >= 0.002:
-
-            # Old Naive method
-            # m = cv2.moments(self.imgThreshBall)
-            # x = int(m['m10']/m['m00'])
-            # y = int(m['m01']/m['m00'])
-            # dx = x - self.center[0]
-            # dy = self.center[1] - y
-
-            # Find the right contour
-            c,h = cv2.findContours(self.imgThreshBall,1,2)
-            
-            maxcArea = 0
             for i in range(len(c)):
-                 cAreas = cv2.contourArea(c[i])
-                 if maxcArea<cAreas:
-                    maxcArea = cAreas
-                    indexcArea = i
-              
-            cnt = c[indexcArea]  # Usually contours with maximum area corresponds to the ball 
+                (x,y),radius = cv2.minEnclosingCircle(c[i])
+                size = float(radius)/self.h
+                if size >= ballSide.BALL_RAD_MIN and size <= ballSide.BALL_RAD_MAX:
+                    return (int(x),int(y))
 
-            (x,y),radius = cv2.minEnclosingCircle(cnt)
-            center = (int(x),int(y))
-            radius = int(radius)
-            # img = cv2.circle(img,center,radius,(0,255,0),2)  #DB PLot
+        # If you get this far, return None
+        return None
 
-            dx = center[0] - self.center[0]
-            dy = self.center[1] - center[1]
-            return (True,dx,dy,0)
-        else:
-            return (False,0,0,0)
 
 def main():
 
