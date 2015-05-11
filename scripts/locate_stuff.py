@@ -128,8 +128,12 @@ class locate_stuff:
     def findBall(self):
 
         #!!! Need to measure color for the orange ball
-        MIN = np.array([1,35,10])
-        MAX = np.array([35,100,115])
+        # MIN = np.array([1,70,10])
+        # MAX = np.array([70,200,115])
+
+        MIN = np.array([1,90,25])
+        MAX = np.array([18,178,200])
+
 
         self.imgThreshBall = cv2.inRange(self.imgHSV,MIN,MAX)
 
@@ -170,11 +174,8 @@ class locate_stuff:
     # Returns tuple (found,x,y,t)
     def findBlock(self):
         # Blue Color 
-        # MIN = np.array([90,30,10])
-        # MAX = np.array([140,160,115])
-
-        MIN = np.array([180,30,10])
-        MAX = np.array([210,180,115])
+        MIN = np.array([90,30,10])
+        MAX = np.array([140,160,115])
 
         # Color threshold
         self.imgThreshBlock = cv2.inRange(self.imgHSV,MIN,MAX)
