@@ -125,25 +125,23 @@ class locate_stuff:
     # Returns type (found,x,y,t)
     def findBall(self):
 
-        #!!! Need to measure color for the orange ball
-        # MIN = np.array([1,70,10])
-        # MAX = np.array([70,200,115])
-
         MIN = np.array([1,90,25])
         MAX = np.array([18,178,200])
 
+        img = cv2.inRange(self.imgHSV,MIN,MAX)
 
-        self.imgThreshBall = cv2.inRange(self.imgHSV,MIN,MAX)
+        # Close the image
+        kernel = np.ones((2,2),np.uint8)
+        img = cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
+
+        # Blur the image
+        # img = cv2.GaussianBlur(img,(3,3),0)
+        img = cv2.medianBlur(img,5)
+
+        self.imgThreshBall = img
 
         # Check if there's enough orange pixels to constitute a ball
         if float(cv2.countNonZero(self.imgThreshBall))/(self.img.shape[0]*self.img.shape[1]) >= 0.002:
-
-            # Old Naive method
-            # m = cv2.moments(self.imgThreshBall)
-            # x = int(m['m10']/m['m00'])
-            # y = int(m['m01']/m['m00'])
-            # dx = x - self.center[0]
-            # dy = self.center[1] - y
 
             # Find the right contour
             c,h = cv2.findContours(self.imgThreshBall,1,2)
@@ -160,7 +158,10 @@ class locate_stuff:
             (x,y),radius = cv2.minEnclosingCircle(cnt)
             center = (int(x),int(y))
             radius = int(radius)
-            # img = cv2.circle(img,center,radius,(0,255,0),2)  #DB PLot
+            
+            # Discard if radius too small
+            if radius < 15:
+                return (False,0,0,0) 
 
             dx = center[0] - self.center[0]
             dy = self.center[1] - center[1]
