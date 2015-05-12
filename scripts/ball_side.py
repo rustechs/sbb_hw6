@@ -12,16 +12,20 @@ class ballSide:
     # Set HSV color constants
     GREEN_MIN = np.array([62,80,190])
     GREEN_MAX = np.array([78,125,230])
-    BALL_MIN = np.array([160,195,245])
-    BALL_MAX = np.array([175,240,255])
-    BALL_RAD_MIN = 0.01
-    BALL_RAD_MAX = 0.02
+    BALL_MIN = np.array([160,190,180])
+    BALL_MAX = np.array([180,255,255])
+    BALL_RAD_MIN = 0.013
+    BALL_RAD_MAX = 0.016
+    BALL_MIN_BGR = np.array([0,0,50])
+    BALL_MAX_BGR = np.array([100,50,255])
     centerW = 0.04
 
     def __init__(self,side):
 
-        # Subscribe to head camera frame topic
+        # Subscribe to head camera frame rgb topic
         self.frame_sub = rospy.Subscriber('camera/rgb/image_color',Image,self.parseFrame)
+        # Subscribe to head camera frame depth topic
+        # self.frame_depth_sub = rospy.Subscriber('camera/depth/image',Image,self.grabDepth)
         # Publish parsed frames to debug topic
         self.frame_pub = rospy.Publisher('sbb/cv/head_cam_overlay',Image,queue_size=10)
         # Publish parsing to topic for controller
@@ -36,7 +40,23 @@ class ballSide:
         # Keep track of last side ball was detected on
         self.ourBall = False
 
-    # Camera frame topic callback
+        # Latest depth image
+        self.depth = None
+
+        # Latest bgr image
+        self.img = None
+
+    # Camera depth frame topic callback
+    def grabDepth(self,data):
+        # Convert image into openCV format
+        try:
+            self.depth = self.br.imgmsg_to_cv2(data, "mono8")
+            import pdb; pdb.set_trace()
+        except CvBridgeError, e:
+            print e
+            raise
+
+    # Camera rgb frame topic callback
     # Parse the frame, look for ball, and publish result to another topic 
     def parseFrame(self,data):
         # Convert image into openCV format
@@ -52,9 +72,6 @@ class ballSide:
 
         # Convert image to HSV
         self.imgHSV = cv2.cvtColor(self.img,cv2.COLOR_BGR2HSV)
-
-        # Perform saturation thresholding
-        # Maybe?
 
         # Find x coordinate of field center
         self.centerX = self.getCenter()
@@ -141,21 +158,83 @@ class ballSide:
 
     def findBall(self):
 
-        self.imgThreshBall = cv2.inRange(self.imgHSV,ballSide.BALL_MIN,ballSide.BALL_MAX)
+        # Threshold image in HSV space for reddish colors
+        imgHSVMask = cv2.inRange(self.imgHSV,ballSide.BALL_MIN,ballSide.BALL_MAX)
 
-        # Try to find ball contour
-        c,h = cv2.findContours(self.imgThreshBall,1,2)
+        # Use HSV threshold to mask BGR image
+        imgBGR = cv2.bitwise_and(self.img,self.img,mask = imgHSVMask)
+
+        # Threshold BGR image 
+        img = cv2.inRange(imgBGR,ballSide.BALL_MIN_BGR,ballSide.BALL_MAX_BGR)
+
+        # Use Kinect depth to threshold away remaining arm garbage
+
+        # Set up ROI
+        ROIhorz = 0.85
+        ROIvert = 0.7
         
-        if len(c) > 0:
+        leftW = int(self.w*(1-ROIhorz)/2)
+        rightW = int(self.w*(0.5+ROIhorz/2))
+        topW = int(self.h*(1-ROIvert)/2)
+        botW = int(self.h*(0.5+ROIvert/2))
 
-            for i in range(len(c)):
-                (x,y),radius = cv2.minEnclosingCircle(c[i])
-                size = float(radius)/self.h
-                if size >= ballSide.BALL_RAD_MIN and size <= ballSide.BALL_RAD_MAX:
-                    return (int(x),int(y))
+        # Mask the ROI
+        img[:,:leftW] = 0
+        img[:,rightW:] = 0
+        img[:topW,:] = 0
+        img[botW:,:] = 0
 
-        # If you get this far, return None
-        return None
+        self.imgThreshBall = img
+
+        # Setup SimpleBlobDetector parameters.
+        params = cv2.SimpleBlobDetector_Params()
+         
+        # Change thresholds
+        params.minThreshold = 0;
+        params.maxThreshold = 255;
+         
+        # Filter by Area.
+        params.filterByArea = True
+        params.minArea = 12
+        params.maxArea = 100
+         
+        # Filter by Circularity
+        params.filterByCircularity = True
+        params.minCircularity = 0.4
+         
+        # Filter by Convexity
+        params.filterByConvexity = False
+        params.minConvexity = 0.25
+        params.maxConvexity = 1
+
+        # Filter by Inertia
+        params.filterByInertia = True
+        params.minInertiaRatio = 0.2
+         
+        # Create a detector with the parameters
+        ver = (cv2.__version__).split('.')
+        if int(ver[0]) < 3 :
+            detector = cv2.SimpleBlobDetector(params)
+        else : 
+            detector = cv2.SimpleBlobDetector_create(params)
+
+
+        blobs = detector.detect(img)
+
+        # import pdb; pdb.set_trace()
+
+        score = 0
+        ind = 0
+        if len(blobs) > 0:
+            for i in range(len(blobs)):
+                if blobs[i].response > score:
+                    score = blobs[i].response
+                    ind = i
+
+            return np.int0(blobs[i].pt)
+
+        else:
+            return None
 
 
 def main():
