@@ -27,7 +27,7 @@ class locate_stuff:
         self.img_serv = rospy.Service('find_stuff',FindStuffSrv,self.servCall)
 
         # Publish overlayed image, ONLY for development DB process
-        self.img_pub = rospy.Publisher('cv/ball_block',Image,queue_size=10)
+        self.img_pub = rospy.Publisher('sbb/cv/ball_block',Image,queue_size=10)
 
         # Create a image conversion bridge
         self.br = CvBridge()

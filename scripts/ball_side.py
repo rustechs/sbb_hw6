@@ -16,7 +16,7 @@ class ballSide:
     BALL_MAX = np.array([180,255,255])
     BALL_RAD_MIN = 0.013
     BALL_RAD_MAX = 0.016
-    BALL_MIN_BGR = np.array([0,0,50])
+    BALL_MIN_BGR = np.array([0,0,229])
     BALL_MAX_BGR = np.array([100,50,255])
     centerW = 0.04
 
@@ -28,6 +28,8 @@ class ballSide:
         # self.frame_depth_sub = rospy.Subscriber('camera/depth/image',Image,self.grabDepth)
         # Publish parsed frames to debug topic
         self.frame_pub = rospy.Publisher('sbb/cv/head_cam_overlay',Image,queue_size=10)
+        #self.frame_pub = rospy.Publisher('robot/xdisplay',Image,queue_size=10)
+
         # Publish parsing to topic for controller
         self.ball_pub = rospy.Publisher('sbb/ball_side',Bool,queue_size=10)
 
@@ -95,7 +97,7 @@ class ballSide:
                 elif (self.ballLoc[0] < self.centerX-ballSide.centerW) and (self.ourBall is True):
                     self.ourBall = False
                     self.ball_pub.publish(self.ourBall)
-                    rospy.loginfo("Ball is on opponent now")
+                    rospy.loginfo("Ball is on opponent side now")
             else: # If we're on the right
                 # Ball has moved to our side since last update
                 if (self.ballLoc[0] < self.centerX-ballSide.centerW) and (self.ourBall is False):
@@ -106,7 +108,7 @@ class ballSide:
                 elif (self.ballLoc[0] > self.centerX+ballSide.centerW) and (self.ourBall is True):
                     self.ourBall = False
                     self.ball_pub.publish(self.ourBall)
-                    rospy.loginfo("Ball is on opponent now")
+                    rospy.loginfo("Ball is on opponent side now")
 
         self.pubDebugImg()
 
@@ -131,6 +133,8 @@ class ballSide:
             cv2.circle(imgShow,(self.ballLoc[0],self.ballLoc[1]),7,(30,240,30),-1)
 
         self.frame_pub.publish(self.br.cv2_to_imgmsg(imgShow, "bgr8"))
+        # self.frame_pub.publish(self.br.cv2_to_imgmsg(cv2.resize(imgShow,(1024,600)), "bgr8"))
+        
 
     def getCenter(self):
         # Threshold for green center field
@@ -166,8 +170,14 @@ class ballSide:
 
         # Threshold BGR image 
         img = cv2.inRange(imgBGR,ballSide.BALL_MIN_BGR,ballSide.BALL_MAX_BGR)
+       
+        # Close the image
+        kernel = np.ones((3,3),np.uint8)
+        img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
 
-        # Use Kinect depth to threshold away remaining arm garbage
+        # Blur the image
+        img = cv2.GaussianBlur(img,(5,5),0)
+        # img = cv2.medianBlur(img,5)
 
         # Set up ROI
         ROIhorz = 0.85
@@ -189,27 +199,29 @@ class ballSide:
         # Setup SimpleBlobDetector parameters.
         params = cv2.SimpleBlobDetector_Params()
          
+        params.filterByColor = False
+
         # Change thresholds
         params.minThreshold = 0;
         params.maxThreshold = 255;
          
         # Filter by Area.
         params.filterByArea = True
-        params.minArea = 12
-        params.maxArea = 100
+        params.minArea = 8
+        params.maxArea = 90
          
         # Filter by Circularity
         params.filterByCircularity = True
-        params.minCircularity = 0.4
+        params.minCircularity = 0.45
          
         # Filter by Convexity
         params.filterByConvexity = False
-        params.minConvexity = 0.25
+        params.minConvexity = 0.15
         params.maxConvexity = 1
 
         # Filter by Inertia
         params.filterByInertia = True
-        params.minInertiaRatio = 0.2
+        params.minInertiaRatio = 0.5
          
         # Create a detector with the parameters
         ver = (cv2.__version__).split('.')
@@ -222,6 +234,8 @@ class ballSide:
         blobs = detector.detect(img)
 
         # import pdb; pdb.set_trace()
+
+        # print blobs
 
         score = 0
         ind = 0
@@ -242,7 +256,7 @@ def main():
     # Init node
     rospy.init_node('ball_side', anonymous = True)
 
-    rospy.loginfo("Waiting on team side assignment")
+    rospy.loginfo("Waiting on team side assignment...")
 
     # Wait for side parameter to exist
     while not rospy.has_param('sbb_side'):
