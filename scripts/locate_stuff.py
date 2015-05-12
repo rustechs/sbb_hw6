@@ -172,15 +172,23 @@ class locate_stuff:
     # Find block using corner detection (with color thresholding)
     # Returns tuple (found,x,y,t)
     def findBlock(self):
-        # Blue Color
-        # MIN = np.array([90,30,15])
-        # MAX = np.array([135,115,100])
+
 
         MIN = np.array([90,130,15])
         MAX = np.array([110,200,100])
 
         # Color threshold
-        self.imgThreshBlock = cv2.inRange(self.imgHSV,MIN,MAX)
+        img = cv2.inRange(self.imgHSV,MIN,MAX)
+
+        # Close the image
+        kernel = np.ones((2,2),np.uint8)
+        img = cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
+
+        # Blur the image
+        # img = cv2.GaussianBlur(img,(3,3),0)
+        img = cv2.medianBlur(img,5)
+
+        self.imgThreshBlock = img
 
         # Check if there's enough blue pixels to constitute a block
         if float(cv2.countNonZero(self.imgThreshBlock))/(self.img.shape[0]*self.img.shape[1]) >= 0.005:
@@ -203,7 +211,7 @@ class locate_stuff:
                  if maxcArea<cAreas:
                     maxcArea = cAreas
                     indexcArea = i
-              
+
             cnt = c[indexcArea]               # Usually contours with maximum area corresponds to the block 
 
             rect = cv2.minAreaRect(cnt)       # Minimum fitted ractangle to the blue block
@@ -216,6 +224,9 @@ class locate_stuff:
             x,y = rect[0]
            
             self.rectW,self.rectH = rect[1]
+
+            if self.rectW * self.rectH < 20:
+                return (False,0,0,0) 
 
             x = int(x)
             y = int(y)

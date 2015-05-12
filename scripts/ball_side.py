@@ -12,20 +12,29 @@ class ballSide:
     # Set HSV color constants
     GREEN_MIN = np.array([62,80,190])
     GREEN_MAX = np.array([78,125,230])
+    #BALL_MIN = np.array([165,80,170])
+    #BALL_MAX = np.array([188,255,255])
     BALL_MIN = np.array([160,190,180])
-    BALL_MAX = np.array([180,255,255])
+    BALL_MAX = np.array([188,255,255])
     BALL_RAD_MIN = 0.013
     BALL_RAD_MAX = 0.016
+    #BALL_MIN_BGR = np.array([0,0,200])
+    #BALL_MAX_BGR = np.array([150,125,255])
     BALL_MIN_BGR = np.array([0,0,229])
-    BALL_MAX_BGR = np.array([100,50,255])
-    centerW = 0.04
+    BALL_MAX_BGR = np.array([120,60,255])
+    
+    # Center deadband width
+    centerW = 0.02
+
+    # Number of frames to average
+    NUMFRAMES = 5
 
     def __init__(self,side):
 
         # Subscribe to head camera frame rgb topic
         self.frame_sub = rospy.Subscriber('camera/rgb/image_color',Image,self.parseFrame)
         # Subscribe to head camera frame depth topic
-        # self.frame_depth_sub = rospy.Subscriber('camera/depth/image',Image,self.grabDepth)
+        self.frame_depth_sub = rospy.Subscriber('camera/depth/image_raw',Image,self.grabDepth)
         # Publish parsed frames to debug topic
         self.frame_pub = rospy.Publisher('sbb/cv/head_cam_overlay',Image,queue_size=10)
         #self.frame_pub = rospy.Publisher('robot/xdisplay',Image,queue_size=10)
@@ -48,12 +57,18 @@ class ballSide:
         # Latest bgr image
         self.img = None
 
+        self.ballHistory = []
+
     # Camera depth frame topic callback
     def grabDepth(self,data):
         # Convert image into openCV format
         try:
-            self.depth = self.br.imgmsg_to_cv2(data, "mono8")
-            import pdb; pdb.set_trace()
+            img = self.br.imgmsg_to_cv2(data)
+            img = np.array(img, dtype="uint16")
+            img = 255.0 / 2500 * np.minimum(img, 2500)
+            self.depth = np.array(img, dtype="uint8")
+            # import pdb; pdb.set_trace()
+
         except CvBridgeError, e:
             print e
             raise
@@ -84,31 +99,38 @@ class ballSide:
         # Find ball in field
        	self.ballLoc = self.findBall()
 
-       	# If ball was found
-       	if self.ballLoc is not None and self.centerX is not None:
+        ballSideMeas = False
+
+        # If both ball and center line are found 
+        if self.ballLoc is not None and self.centerX is not None:
             rospy.loginfo("Last Known Ball Loc: %s" % str(self.ballLoc))
-            if self.side is 'left': # If we're on the left
+            rospy.loginfo("Last Center: %s" % str(self.centerX))
+            if self.side == 'left': # If we're on the left
                 # Ball has moved to our side since last update
-                if (self.ballLoc[0] >= self.centerX+ballSide.centerW) and (self.ourBall is False):
-                    self.ourBall = True
-                    self.ball_pub.publish(self.ourBall)
-                    rospy.loginfo("Ball is on our side now")
+                if (self.ballLoc[0] >= self.centerX):
+                    ballSideMeas = True
                 # Ball has moved to opponent side since last update
-                elif (self.ballLoc[0] < self.centerX-ballSide.centerW) and (self.ourBall is True):
-                    self.ourBall = False
-                    self.ball_pub.publish(self.ourBall)
-                    rospy.loginfo("Ball is on opponent side now")
+                elif (self.ballLoc[0] <= self.centerX):
+                    ballSideMeas = False
             else: # If we're on the right
                 # Ball has moved to our side since last update
-                if (self.ballLoc[0] < self.centerX-ballSide.centerW) and (self.ourBall is False):
-                    self.ourBall = True
-                    self.ball_pub.publish(self.ourBall)
-                    rospy.loginfo("Ball is on our side now")
+                if (self.ballLoc[0] <= self.centerX):
+                    ballSideMeas = True
                 # Ball has moved to opponent side since last update
-                elif (self.ballLoc[0] > self.centerX+ballSide.centerW) and (self.ourBall is True):
-                    self.ourBall = False
-                    self.ball_pub.publish(self.ourBall)
-                    rospy.loginfo("Ball is on opponent side now")
+                elif (self.ballLoc[0] >= self.centerX):
+                    ballSideMeas = False
+
+            # Append latest measurement to history
+            self.ballHistory.append(ballSideMeas)
+
+        if len(self.ballHistory) == ballSide.NUMFRAMES:
+            print self.ballHistory
+            if self.ballHistory.count(not self.ourBall) >= int(np.ceil(ballSide.NUMFRAMES/2.0)):
+                self.ourBall = not self.ourBall
+
+            self.ball_pub.publish(self.ourBall)
+            # Clear history
+            self.ballHistory = []
 
         self.pubDebugImg()
 
@@ -158,12 +180,24 @@ class ballSide:
         ballSide.centerMask = img
 
         m = cv2.moments(img)
-        return int(m['m10']/m['m00'])
+
+        if (m is not None) and (m['m00'] != 0):
+            return int(m['m10']/m['m00'])
+        else:
+            return None
 
     def findBall(self):
 
         # Threshold image in HSV space for reddish colors
-        imgHSVMask = cv2.inRange(self.imgHSV,ballSide.BALL_MIN,ballSide.BALL_MAX)
+        HSVHighThreshMAX = ballSide.BALL_MAX
+        HSVHighThreshMAX[0] = 180
+        imgHSVMaskHigh = cv2.inRange(self.imgHSV,ballSide.BALL_MIN,HSVHighThreshMAX)
+        HSVLowThreshMIN = ballSide.BALL_MIN
+        HSVLowThreshMIN[0] = 0
+        HSVLowThreshMAX = ballSide.BALL_MAX
+        HSVLowThreshMAX[0] = HSVLowThreshMAX[0] % 180
+        imgHSVMaskLow = cv2.inRange(self.imgHSV,HSVLowThreshMIN,HSVLowThreshMAX)
+        imgHSVMask = cv2.bitwise_or(imgHSVMaskLow,imgHSVMaskHigh)
 
         # Use HSV threshold to mask BGR image
         imgBGR = cv2.bitwise_and(self.img,self.img,mask = imgHSVMask)
@@ -171,13 +205,20 @@ class ballSide:
         # Threshold BGR image 
         img = cv2.inRange(imgBGR,ballSide.BALL_MIN_BGR,ballSide.BALL_MAX_BGR)
        
+        # Threshold using depth
+        kDepth = np.ones((5,5),np.uint8)
+        depthMask = cv2.inRange(self.depth,110,170)
+        depthMask = cv2.dilate(depthMask,kDepth,iterations = 1)
+        img = cv2.bitwise_and(img,img,mask = depthMask)
+
+
         # Close the image
-        kernel = np.ones((3,3),np.uint8)
-        img = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
+        kClose = np.ones((3,3),np.uint8)
+        img = cv2.morphologyEx(img, cv2.MORPH_OPEN, kClose)
 
         # Blur the image
+        # img = cv2.medianBlur(img,3)
         img = cv2.GaussianBlur(img,(5,5),0)
-        # img = cv2.medianBlur(img,5)
 
         # Set up ROI
         ROIhorz = 0.85
@@ -202,17 +243,17 @@ class ballSide:
         params.filterByColor = False
 
         # Change thresholds
-        params.minThreshold = 0;
-        params.maxThreshold = 255;
+        params.minThreshold = 0
+        params.maxThreshold = 255
          
         # Filter by Area.
         params.filterByArea = True
-        params.minArea = 8
+        params.minArea = 10
         params.maxArea = 90
          
         # Filter by Circularity
         params.filterByCircularity = True
-        params.minCircularity = 0.45
+        params.minCircularity = 0.3
          
         # Filter by Convexity
         params.filterByConvexity = False
@@ -220,8 +261,8 @@ class ballSide:
         params.maxConvexity = 1
 
         # Filter by Inertia
-        params.filterByInertia = True
-        params.minInertiaRatio = 0.5
+        params.filterByInertia = False
+        params.minInertiaRatio = 0.4
          
         # Create a detector with the parameters
         ver = (cv2.__version__).split('.')
@@ -234,8 +275,6 @@ class ballSide:
         blobs = detector.detect(img)
 
         # import pdb; pdb.set_trace()
-
-        # print blobs
 
         score = 0
         ind = 0
