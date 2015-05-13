@@ -10,8 +10,8 @@ from std_msgs.msg import Bool
 class ballSide:
 
     # Set HSV color constants
-    GREEN_MIN = np.array([50,100,100])
-    GREEN_MAX = np.array([80,180,255])
+    GREEN_MIN = np.array([60,100,127])
+    GREEN_MAX = np.array([68,128,178])
     #BALL_MIN = np.array([165,80,170])
     #BALL_MAX = np.array([188,255,255])
     BALL_MIN = np.array([160,190,180])
@@ -34,7 +34,7 @@ class ballSide:
         # Subscribe to head camera frame rgb topic
         self.frame_sub = rospy.Subscriber('camera/rgb/image_color',Image,self.parseFrame)
         # Subscribe to head camera frame depth topic
-        # self.frame_depth_sub = rospy.Subscriber('camera/depth/image_raw',Image,self.grabDepth)
+        self.frame_depth_sub = rospy.Subscriber('camera/depth/image_raw',Image,self.grabDepth)
         # Publish parsed frames to debug topic
         self.frame_pub = rospy.Publisher('sbb/cv/head_cam_overlay',Image,queue_size=10)
         #self.frame_pub = rospy.Publisher('robot/xdisplay',Image,queue_size=10)
@@ -139,10 +139,10 @@ class ballSide:
         imgShow = self.img
 
         # Show masked center field image
-        imgShow = cv2.bitwise_and(imgShow,imgShow,mask = self.centerMask)
+        # imgShowField = cv2.bitwise_and(imgShow,imgShow,mask = self.centerMask)
 
         # Show masked ball image
-        # imgShow = cv2.bitwise_and(imgShow,imgShow,mask = self.imgThreshBall)
+        imgShow = cv2.bitwise_and(imgShow,imgShow,mask = self.imgThreshBall)
 
         # imgShow = cv2.bitwise_or(imgShowBall,imgShowField)
 
@@ -206,10 +206,10 @@ class ballSide:
         img = cv2.inRange(imgBGR,ballSide.BALL_MIN_BGR,ballSide.BALL_MAX_BGR)
        
         # Threshold using depth
-        # kDepth = np.ones((5,5),np.uint8)
-        # depthMask = cv2.inRange(self.depth,110,170)
-        # depthMask = cv2.dilate(depthMask,kDepth,iterations = 1)
-        # img = cv2.bitwise_and(img,img,mask = depthMask)
+        kDepth = np.ones((5,5),np.uint8)
+        depthMask = cv2.inRange(self.depth,110,170)
+        depthMask = cv2.dilate(depthMask,kDepth,iterations = 1)
+        img = cv2.bitwise_and(img,img,mask = depthMask)
 
 
         # Close the image
