@@ -139,10 +139,10 @@ class ballSide:
         imgShow = self.img
 
         # Show masked center field image
-        imgShow = cv2.bitwise_and(imgShow,imgShow,mask = self.centerMask)
+        # imgShow = cv2.bitwise_and(imgShow,imgShow,mask = self.centerMask)
 
         # Show masked ball image
-        # imgShow = cv2.bitwise_and(imgShow,imgShow,mask = self.imgThreshBall)
+        imgShow = cv2.bitwise_and(imgShow,imgShow,mask = self.imgThreshBall)
 
         # imgShow = cv2.bitwise_or(imgShowBall,imgShowField)
 
